@@ -73,11 +73,9 @@ void MdpRot::setSource(const overlay::utils::Whf& awhf) {
 }
 
 void MdpRot::setFlags(const utils::eMdpFlags& flags) {
-#ifndef QCOM_NO_SECURE_PLAYBACK
     mRotImgInfo.secure = 0;
     if(flags & utils::OV_MDP_SECURE_OVERLAY_SESSION)
         mRotImgInfo.secure = 1;
-#endif
 }
 
 void MdpRot::setTransform(const utils::eTransform& rot, const bool& rotUsed)
@@ -110,30 +108,22 @@ void MdpRot::doTransform() {
 
 bool MdpRot::commit() {
     doTransform();
-    if (this->rotConfChanged()) {
-        if(!overlay::mdp_wrapper::startRotator(mFd.getFD(), mRotImgInfo)) {
-            ALOGE("MdpRot commit failed");
-            dump();
-            return false;
-        }
-        this->save();
-        mRotDataInfo.session_id = mRotImgInfo.session_id;
+    if(!overlay::mdp_wrapper::startRotator(mFd.getFD(), mRotImgInfo)) {
+        ALOGE("MdpRot commit failed");
+        dump();
+        return false;
     }
+    mRotDataInfo.session_id = mRotImgInfo.session_id;
     return true;
 }
 
 bool MdpRot::open_i(uint32_t numbufs, uint32_t bufsz)
 {
     OvMem mem;
-    int secureFlag = 0;
 
     OVASSERT(MAP_FAILED == mem.addr(), "MAP failed in open_i");
 
-#ifndef QCOM_NO_SECURE_PLAYBACK
-    secureFlag = mRotImgInfo.secure;
-#endif
-
-    if(!mem.open(numbufs, bufsz, secureFlag)){
+    if(!mem.open(numbufs, bufsz, mRotImgInfo.secure)){
         ALOGE("%s: Failed to open", __func__);
         mem.close();
         return false;
@@ -193,7 +183,6 @@ bool MdpRot::remap(uint32_t numbufs) {
 
 void MdpRot::reset() {
     ovutils::memset0(mRotImgInfo);
-    ovutils::memset0(mLSRotImgInfo);
     ovutils::memset0(mRotDataInfo);
     ovutils::memset0(mMem.curr().mRotOffset);
     ovutils::memset0(mMem.prev().mRotOffset);

@@ -53,8 +53,8 @@ int gpu_context_t::gralloc_alloc_framebuffer_locked(size_t size, int usage,
 {
     private_module_t* m = reinterpret_cast<private_module_t*>(common.module);
 
-    // we don't support allocations with both the FB and PMEM_ADSP flags
-    if (usage & GRALLOC_USAGE_PRIVATE_ADSP_HEAP) {
+    // we don't support framebuffer allocations with graphics heap flags
+    if (usage & GRALLOC_HEAP_MASK) {
         return -EINVAL;
     }
 
@@ -139,25 +139,39 @@ int gpu_context_t::gralloc_alloc_buffer(size_t size, int usage,
     data.pHandle = (unsigned int) pHandle;
     err = mAllocCtrl->allocate(data, usage, 0);
 
-    if (usage & GRALLOC_USAGE_PRIVATE_UNSYNCHRONIZED) {
-        flags |= private_handle_t::PRIV_FLAGS_UNSYNCHRONIZED;
-    }
+    if (!err) {
+        /* allocate memory for enhancement data */
+        alloc_data eData;
+        eData.fd = -1;
+        eData.base = 0;
+        eData.offset = 0;
+        eData.size = ROUND_UP_PAGESIZE(sizeof(MetaData_t));
+        eData.pHandle = data.pHandle;
+        eData.align = getpagesize();
+        int eDataUsage = GRALLOC_USAGE_PRIVATE_SYSTEM_HEAP;
+        int eDataErr = mAllocCtrl->allocate(eData, eDataUsage, 0);
+        ALOGE_IF(eDataErr, "gralloc failed for eData err=%s", strerror(-err));
 
-    if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY) {
-        flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_ONLY;
-        //The EXTERNAL_BLOCK flag is always an add-on
-        if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_BLOCK) {
-            flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_BLOCK;
-        }if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_CC) {
-            flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_CC;
+        if (usage & GRALLOC_USAGE_PRIVATE_UNSYNCHRONIZED) {
+            flags |= private_handle_t::PRIV_FLAGS_UNSYNCHRONIZED;
         }
-    }
 
-    if (err == 0) {
+        if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY) {
+            flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_ONLY;
+            //The EXTERNAL_BLOCK flag is always an add-on
+            if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_BLOCK) {
+                flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_BLOCK;
+            }
+            if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_CC) {
+                flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_CC;
+            }
+        }
+
         flags |= data.allocType;
-        private_handle_t* hnd = new private_handle_t(data.fd, size, flags,
-                                                     bufferType, format, width,
-                                                     height);
+        int eBaseAddr = int(eData.base) + eData.offset;
+        private_handle_t *hnd = new private_handle_t(data.fd, size, flags,
+                bufferType, format, width, height, eData.fd, eData.offset,
+                eBaseAddr);
 
         hnd->offset = data.offset;
         hnd->base = int(data.base) + data.offset;
@@ -165,6 +179,7 @@ int gpu_context_t::gralloc_alloc_buffer(size_t size, int usage,
     }
 
     ALOGE_IF(err, "gralloc failed err=%s", strerror(-err));
+
     return err;
 }
 
@@ -175,10 +190,7 @@ void gpu_context_t::getGrallocInformationFromFormat(int inputFormat,
     *bufferType = BUFFER_TYPE_VIDEO;
     *colorFormat = inputFormat;
 
-    // HAL_PIXEL_FORMAT_RGB_888 is MPQ color format for VCAP videos
-    // value of RGB_888 is less than 0x7 and this format is not supported
-    // by the GPU
-    if ((inputFormat < 0x7) && (inputFormat != HAL_PIXEL_FORMAT_RGB_888)) {
+    if (inputFormat < 0x7) {
         // RGB formats
         *colorFormat = inputFormat;
         *bufferType = BUFFER_TYPE_UI;
@@ -248,6 +260,13 @@ int gpu_context_t::free_impl(private_handle_t const* hnd) {
         int err = memalloc->free_buffer((void*)hnd->base, (size_t) hnd->size,
                                         hnd->offset, hnd->fd);
         if(err)
+            return err;
+        // free the metadata space
+        unsigned long size = ROUND_UP_PAGESIZE(sizeof(MetaData_t));
+        err = memalloc->free_buffer((void*)hnd->base_metadata,
+                                    (size_t) size, hnd->offset_metadata,
+                                    hnd->fd_metadata);
+        if (err)
             return err;
     }
 

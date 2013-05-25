@@ -89,7 +89,7 @@ class ExternalDisplay
     int getModeOrder(int mode);
     int getBestMode();
     void resetInfo();
-    void configureWFDDisplay(int fbIndex);
+    void triggerRefresh();
 
     mutable android::Mutex mExtDispLock;
     int mFd;

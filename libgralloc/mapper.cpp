@@ -85,6 +85,24 @@ static int gralloc_map(gralloc_module_t const* module,
         hnd->base = intptr_t(mappedAddress) + hnd->offset;
         //LOGD("gralloc_map() succeeded fd=%d, off=%d, size=%d, vaddr=%p",
         //        hnd->fd, hnd->offset, hnd->size, mappedAddress);
+        mappedAddress = MAP_FAILED;
+        size = ROUND_UP_PAGESIZE(sizeof(MetaData_t));
+        err = memalloc->map_buffer(&mappedAddress, size,
+                                       hnd->offset_metadata, hnd->fd_metadata);
+        if(err) {
+            ALOGE("Could not mmap handle %p, fd=%d (%s)",
+                  handle, hnd->fd_metadata, strerror(errno));
+            hnd->base_metadata = 0;
+            return -errno;
+        }
+
+        if (mappedAddress == MAP_FAILED) {
+            ALOGE("Could not mmap handle %p, fd=%d (%s)",
+                  handle, hnd->fd_metadata, strerror(errno));
+            hnd->base_metadata = 0;
+            return -errno;
+        }
+        hnd->base_metadata = intptr_t(mappedAddress) + hnd->offset_metadata;
     }
     *vaddr = (void*)hnd->base;
     return 0;
@@ -99,10 +117,17 @@ static int gralloc_unmap(gralloc_module_t const* module,
         void* base = (void*)hnd->base;
         size_t size = hnd->size;
         sp<IMemAlloc> memalloc = getAllocator(hnd->flags) ;
-        if(memalloc != NULL)
+        if(memalloc != NULL) {
             err = memalloc->unmap_buffer(base, size, hnd->offset);
-        if (err) {
-            ALOGE("Could not unmap memory at address %p", base);
+            if (err) {
+                ALOGE("Could not unmap memory at address %p", base);
+            }
+            base = (void*)hnd->base_metadata;
+            size = ROUND_UP_PAGESIZE(sizeof(MetaData_t));
+            err = memalloc->unmap_buffer(base, size, hnd->offset_metadata);
+            if (err) {
+                ALOGE("Could not unmap memory at address %p", base);
+            }
         }
     }
     hnd->base = 0;
@@ -289,6 +314,12 @@ int gralloc_unlock(gralloc_module_t const* module,
                                      hnd->size, hnd->offset, hnd->fd);
         ALOGE_IF(err < 0, "cannot flush handle %p (offs=%x len=%x, flags = 0x%x) err=%s\n",
                  hnd, hnd->offset, hnd->size, hnd->flags, strerror(errno));
+        unsigned long size = ROUND_UP_PAGESIZE(sizeof(MetaData_t));
+        err = memalloc->clean_buffer((void*)hnd->base_metadata, size,
+                hnd->offset_metadata, hnd->fd_metadata);
+        ALOGE_IF(err < 0, "cannot flush handle %p (offs=%x len=%lu, "
+                "flags = 0x%x) err=%s\n", hnd, hnd->offset_metadata, size,
+                hnd->flags, strerror(errno));
         hnd->flags &= ~private_handle_t::PRIV_FLAGS_NEEDS_FLUSH;
     }
 
@@ -328,25 +359,7 @@ int gralloc_perform(struct gralloc_module_t const* module,
                     private_handle_t::sNumFds, private_handle_t::sNumInts);
                 hnd->magic = private_handle_t::sMagic;
                 hnd->fd = fd;
-                unsigned int contigFlags = GRALLOC_USAGE_PRIVATE_ADSP_HEAP |
-                    GRALLOC_USAGE_PRIVATE_UI_CONTIG_HEAP |
-                    GRALLOC_USAGE_PRIVATE_SMI_HEAP;
-
-                if (memoryFlags & contigFlags) {
-                    // check if the buffer is a pmem buffer
-                    pmem_region region;
-                    if (ioctl(fd, PMEM_GET_SIZE, &region) < 0)
-                        hnd->flags =  private_handle_t::PRIV_FLAGS_USES_ION;
-                    else
-                        hnd->flags =  private_handle_t::PRIV_FLAGS_USES_PMEM |
-                            private_handle_t::PRIV_FLAGS_DO_NOT_FLUSH;
-                } else {
-                    if (memoryFlags & GRALLOC_USAGE_PRIVATE_ION)
-                        hnd->flags =  private_handle_t::PRIV_FLAGS_USES_ION;
-                    else
-                        hnd->flags =  private_handle_t::PRIV_FLAGS_USES_ASHMEM;
-                }
-
+                hnd->flags =  private_handle_t::PRIV_FLAGS_USES_ION;
                 hnd->size = size;
                 hnd->offset = offset;
                 hnd->base = intptr_t(base) + offset;

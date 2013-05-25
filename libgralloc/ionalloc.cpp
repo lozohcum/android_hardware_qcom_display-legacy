@@ -118,9 +118,7 @@ int IonAlloc::alloc_buffer(alloc_data& data)
         return err;
     }
 
-    if(!(data.flags & ION_SECURE) &&
-       !(data.allocType & private_handle_t::PRIV_FLAGS_NOT_MAPPED)) {
-
+    if(!(data.flags & ION_SECURE)) {
         base = mmap(0, ionAllocData.len, PROT_READ|PROT_WRITE,
                     MAP_SHARED, fd_data.fd, 0);
         if(base == MAP_FAILED) {
@@ -128,8 +126,6 @@ int IonAlloc::alloc_buffer(alloc_data& data)
             ALOGE("%s: Failed to map the allocated memory: %s",
                   __FUNCTION__, strerror(errno));
             ioctl(mIonFd, ION_IOC_FREE, &handle_data);
-            if(ionSyncFd >= 0)
-                close(ionSyncFd);
             ionSyncFd = FD_INIT;
             return err;
         }

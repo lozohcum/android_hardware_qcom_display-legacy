@@ -78,4 +78,5 @@ inline QCCompositionType::QCCompositionType()
 }
 
 }; //namespace qdutils
+ANDROID_SINGLETON_STATIC_INSTANCE(qdutils::QCCompositionType);
 #endif //INCLUDE_LIBQCOM_COMPTYPES

@@ -51,7 +51,6 @@ bool isStateValid(const utils::eOverlayState& st) {
         case utils::OV_3D_VIDEO_ON_3D_PANEL:
         case utils::OV_3D_VIDEO_ON_3D_TV:
         case utils::OV_3D_VIDEO_ON_2D_PANEL_2D_TV:
-        case utils::OV_2D_PIP_VIDEO_ON_PANEL:
         case utils::OV_UI_MIRROR:
         case utils::OV_2D_TRUE_UI_MIRROR:
         case utils::OV_BYPASS_1_LAYER:
@@ -191,12 +190,8 @@ utils::eOverlayState Overlay::getState() const {
 Overlay *Overlay::sInstance = 0;
 
 Overlay* Overlay::getInstance() {
-    if(sInstance == NULL) {
-        if(utils::initOverlay() == -1) {
-            ALOGE("utils::initOverlay() ERROR!!");
-        }
+    if(sInstance == NULL)
         sInstance = new Overlay();
-    }
     return sInstance;
 }
 

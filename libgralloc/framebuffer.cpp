@@ -277,18 +277,12 @@ int mapFrameBufferLocked(struct private_module_t* module)
     uint32_t line_length = (info.xres * info.bits_per_pixel / 8);
     info.yres_virtual = (size * numberOfBuffers) / line_length;
 
-#if !defined(NO_HW_VSYNC) && defined(MSMFB_METADATA_SET)
-    struct msmfb_metadata metadata;
-
-    metadata.op = metadata_op_base_blend;
-    metadata.flags = 0;
-    metadata.data.blend_cfg.is_premultiplied = 1;
-    if(ioctl(fd, MSMFB_METADATA_SET, &metadata) == -1) {
-        ALOGW("MSMFB_METADATA_SET failed to configure alpha mode");
-    }
-#endif
-
     uint32_t flags = PAGE_FLIP;
+    if (ioctl(fd, FBIOPUT_VSCREENINFO, &info) == -1) {
+        info.yres_virtual = size / line_length;
+        flags &= ~PAGE_FLIP;
+        ALOGW("FBIOPUT_VSCREENINFO failed, page flipping not supported");
+    }
 
     if (info.yres_virtual < ((size * 2) / line_length) ) {
         // we need at least 2 for page-flipping
@@ -310,8 +304,8 @@ int mapFrameBufferLocked(struct private_module_t* module)
 
     float xdpi = (info.xres * 25.4f) / info.width;
     float ydpi = (info.yres * 25.4f) / info.height;
-    //The reserved[3] field is used to store FPS by the driver.
-    float fps  = info.reserved[3] & 0xFF;
+    //The reserved[4] field is used to store FPS by the driver.
+    float fps  = info.reserved[4];
 
     ALOGI("using (fd=%d)\n"
           "id           = %s\n"

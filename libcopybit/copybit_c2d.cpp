@@ -901,14 +901,14 @@ static size_t get_size(const bufferInfo& info)
             {
                 // Chroma for this format is aligned to 2K.
                 size = ALIGN((aligned_w*h), 2048) +
-                        ALIGN(aligned_w/2, 32) * (h/2) *2;
+                    ALIGN(w/2, 32) * h/2 *2;
                 size = ALIGN(size, 4096);
             } break;
         case HAL_PIXEL_FORMAT_YCbCr_420_SP:
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
             {
-                size = aligned_w * h +
-                       ALIGN(aligned_w/2, 32) * (h/2) * 2;
+                size = aligned_w*h +
+                    ALIGN(w/2, 32) * h/2 *2;
                 size = ALIGN(size, 4096);
             } break;
         default: break;

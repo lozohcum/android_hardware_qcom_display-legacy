@@ -39,21 +39,9 @@
 #include "gr.h"
 #include "comptype.h"
 
-ANDROID_SINGLETON_STATIC_INSTANCE(qdutils::QCCompositionType);
-
 using namespace gralloc;
 using namespace qdutils;
 using android::sp;
-
-const int GRALLOC_HEAP_MASK  =  GRALLOC_USAGE_PRIVATE_ADSP_HEAP      |
-                                GRALLOC_USAGE_PRIVATE_UI_CONTIG_HEAP |
-                                GRALLOC_USAGE_PRIVATE_SMI_HEAP       |
-                                GRALLOC_USAGE_PRIVATE_SYSTEM_HEAP    |
-                                GRALLOC_USAGE_PRIVATE_IOMMU_HEAP     |
-                                GRALLOC_USAGE_PRIVATE_MM_HEAP        |
-                                GRALLOC_USAGE_PRIVATE_WRITEBACK_HEAP |
-                                GRALLOC_USAGE_PRIVATE_CAMERA_HEAP;
-
 
 //Common functions
 static bool canFallback(int usage, bool triedSystem)
@@ -65,9 +53,6 @@ static bool canFallback(int usage, bool triedSystem)
     // 4. The heap type is protected
     // 5. The buffer is meant for external display only
 
-    if(QCCompositionType::getInstance().getCompositionType() &
-       COMPOSITION_TYPE_MDP)
-        return false;
     if(triedSystem)
         return false;
     if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PROTECTED |
@@ -138,19 +123,11 @@ int IonController::allocate(alloc_data& data, int usage,
     if(usage & GRALLOC_USAGE_PRIVATE_MM_HEAP)
         ionFlags |= ION_HEAP(ION_CP_MM_HEAP_ID);
 
-    if(usage & GRALLOC_USAGE_PRIVATE_WRITEBACK_HEAP)
-        ionFlags |= ION_HEAP(ION_CP_WB_HEAP_ID);
-
     if(usage & GRALLOC_USAGE_PRIVATE_CAMERA_HEAP)
         ionFlags |= ION_HEAP(ION_CAMERA_HEAP_ID);
 
     if(usage & GRALLOC_USAGE_PRIVATE_CP_BUFFER)
         ionFlags |= ION_SECURE;
-
-    if(usage & GRALLOC_USAGE_PRIVATE_DO_NOT_MAP)
-        data.allocType  |=  private_handle_t::PRIV_FLAGS_NOT_MAPPED;
-    else
-        data.allocType  &=  ~(private_handle_t::PRIV_FLAGS_NOT_MAPPED);
 
     // if no flags are set, default to
     // SF + IOMMU heaps, so that bypass can work

@@ -23,21 +23,6 @@
 
 namespace ovutils = overlay::utils;
 namespace overlay {
-
-//Helper to even out x,w and y,h pairs
-//x,y are always evened to ceil and w,h are evened to floor
-static void normalizeCrop(uint32_t& xy, uint32_t& wh) {
-    if(xy & 1) {
-        utils::even_ceil(xy);
-        if(wh & 1)
-            utils::even_floor(wh);
-        else
-            wh -= 2;
-    } else {
-        utils::even_floor(wh);
-    }
-}
-
 bool MdpCtrl::init(uint32_t fbnum) {
     // FD init
     if(!utils::openDev(mFd, fbnum,
@@ -58,21 +43,17 @@ void MdpCtrl::reset() {
 }
 
 bool MdpCtrl::close() {
-    bool result = true;
-
-    if(MSMFB_NEW_REQUEST != static_cast<int>(mOVInfo.id)) {
-        if(!mdp_wrapper::unsetOverlay(mFd.getFD(), mOVInfo.id)) {
-            ALOGE("MdpCtrl close error in unset");
-            result = false;
-        }
+    if(MSMFB_NEW_REQUEST == static_cast<int>(mOVInfo.id))
+        return true;
+    if(!mdp_wrapper::unsetOverlay(mFd.getFD(), mOVInfo.id)) {
+        ALOGE("MdpCtrl close error in unset");
+        return false;
     }
-
     reset();
     if(!mFd.close()) {
-        result = false;
+        return false;
     }
-
-    return result;
+    return true;
 }
 
 bool MdpCtrl::setSource(const utils::PipeArgs& args) {
@@ -101,12 +82,12 @@ bool MdpCtrl::setPosition(const overlay::utils::Dim& d,
     ovutils::Dim dim(d);
     ovutils::Dim ovsrcdim = getSrcRectDim();
     // Scaling of upto a max of 20 times supported
-    if(dim.w >(ovsrcdim.w * ovutils::getOverlayMagnificationLimit())){
-        dim.w = ovutils::getOverlayMagnificationLimit() * ovsrcdim.w;
+    if(dim.w >(ovsrcdim.w * ovutils::HW_OV_MAGNIFICATION_LIMIT)){
+        dim.w = ovutils::HW_OV_MAGNIFICATION_LIMIT * ovsrcdim.w;
         dim.x = (fbw - dim.w) / 2;
     }
-    if(dim.h >(ovsrcdim.h * ovutils::getOverlayMagnificationLimit())) {
-        dim.h = ovutils::getOverlayMagnificationLimit() * ovsrcdim.h;
+    if(dim.h >(ovsrcdim.h * ovutils::HW_OV_MAGNIFICATION_LIMIT)) {
+        dim.h = ovutils::HW_OV_MAGNIFICATION_LIMIT * ovsrcdim.h;
         dim.y = (fbh - dim.h) / 2;
     }
 
@@ -143,55 +124,9 @@ void MdpCtrl::doTransform() {
     }
 }
 
-int MdpCtrl::doDownscale() {
-    int dscale_factor = utils::ROT_DS_NONE;
-    int src_w = mOVInfo.src_rect.w;
-    int src_h = mOVInfo.src_rect.h;
-    int dst_w = mOVInfo.dst_rect.w;
-    int dst_h = mOVInfo.dst_rect.h;
-    // We need this check to engage the rotator whenever possible to assist MDP
-    // in performing video downscale.
-    // This saves bandwidth and avoids causing the driver to make too many panel
-    // -mode switches between BLT (writeback) and non-BLT (Direct) modes.
-    // Use-case: Video playback [with downscaling and rotation].
-
-    if (dst_w && dst_h)
-    {
-        uint32_t dscale = (src_w * src_h) / (dst_w * dst_h);
-
-        if(dscale < 2) {
-            // Down-scale to > 50% of orig.
-            dscale_factor = utils::ROT_DS_NONE;
-        } else if(dscale < 4) {
-            // Down-scale to between > 25% to <= 50% of orig.
-            dscale_factor = utils::ROT_DS_HALF;
-        } else if(dscale < 8) {
-            // Down-scale to between > 12.5% to <= 25% of orig.
-            dscale_factor = utils::ROT_DS_FOURTH;
-        } else {
-            // Down-scale to <= 12.5% of orig.
-            dscale_factor = utils::ROT_DS_EIGHTH;
-        }
-    }
-
-    mOVInfo.src_rect.x >>= dscale_factor;
-    mOVInfo.src_rect.y >>= dscale_factor;
-    mOVInfo.src_rect.w >>= dscale_factor;
-    mOVInfo.src_rect.h >>= dscale_factor;
-
-    return dscale_factor;
-}
-
 bool MdpCtrl::set() {
     //deferred calcs, so APIs could be called in any order.
-    utils::Whf whf = getSrcWhf();
-    if(utils::isYuv(whf.format)) {
-        normalizeCrop(mOVInfo.src_rect.x, mOVInfo.src_rect.w);
-        normalizeCrop(mOVInfo.src_rect.y, mOVInfo.src_rect.h);
-        utils::even_floor(mOVInfo.dst_rect.w);
-        utils::even_floor(mOVInfo.dst_rect.h);
-    }
-
+    doTransform();
     if(this->ovChanged()) {
         if(!mdp_wrapper::setOverlay(mFd.getFD(), mOVInfo)) {
             ALOGE("MdpCtrl failed to setOverlay, restoring last known "
@@ -203,7 +138,6 @@ bool MdpCtrl::set() {
         }
         this->save();
     }
-
     return true;
 }
 

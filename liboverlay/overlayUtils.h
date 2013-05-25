@@ -42,7 +42,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <utils/Log.h>
-#include <mdp_version.h>
 #include "gralloc_priv.h" //for interlace
 /*
 *
@@ -140,11 +139,6 @@ enum { INPUT_3D_MASK = 0xFFFF0000,
     OUTPUT_3D_MASK = 0x0000FFFF };
 enum { BARRIER_LAND = 1,
     BARRIER_PORT = 2 };
-
-/* if SurfaceFlinger process gets killed in bypass mode, In initOverlay()
- * close all the pipes if it is opened after reboot.
- */
-int initOverlay(void);
 
 inline uint32_t format3D(uint32_t x) { return x & 0xFF000; }
 inline uint32_t colorFormat(uint32_t fmt) {
@@ -274,20 +268,8 @@ enum { MAX_PATH_LEN = 256 };
  * When a simple video playback on HDMI, no rotator is being used.(null r).
  * */
 enum eRotFlags {
-    ROT_FLAGS_NONE = 0,
-    //Use rotator for 0 rotation. It is used anyway for others.
-    ROT_0_ENABLED = 1 << 0,
-    //Enable rotator downscale optimization for hardware bugs not handled in
-    //driver. If downscale optimizatation is required,
-    //then rotator will be used even if its 0 rotation case.
-    ROT_DOWNSCALE_ENABLED = 1 << 1,
-};
-
-enum eRotDownscale {
-    ROT_DS_NONE = 0,
-    ROT_DS_HALF = 1,
-    ROT_DS_FOURTH = 2,
-    ROT_DS_EIGHTH = 3,
+    ROT_FLAG_DISABLED = 0,
+    ROT_FLAG_ENABLED = 1 // needed in rot
 };
 
 /* The values for is_fg flag for control alpha and transp
@@ -313,7 +295,6 @@ enum eMdpFlags {
     OV_MDP_MEMORY_ID_TYPE_FB = MDP_MEMORY_ID_TYPE_FB,
     OV_MDP_BACKEND_COMPOSITION = MDP_BACKEND_COMPOSITION,
     OV_MDP_BLEND_FG_PREMULT = MDP_BLEND_FG_PREMULT,
-    OV_MDP_180_FLIP = MDP_FLIP_UD|MDP_FLIP_LR,
 };
 
 enum eZorder {
@@ -373,7 +354,7 @@ struct PipeArgs {
     PipeArgs() : mdpFlags(OV_MDP_FLAGS_NONE),
         zorder(Z_SYSTEM_ALLOC),
         isFg(IS_FG_OFF),
-        rotFlags(ROT_FLAGS_NONE){
+        rotFlags(ROT_FLAG_DISABLED){
     }
 
     PipeArgs(eMdpFlags f, Whf _whf,
@@ -408,9 +389,6 @@ enum eOverlayState{
 
     /* 3D Video on two displays (panel and TV) */
     OV_3D_VIDEO_ON_2D_PANEL_2D_TV,
-
-    /* PIP, two videos on TV or primary panel */
-    OV_2D_PIP_VIDEO_ON_PANEL,
 
     /* UI Mirroring */
     OV_UI_MIRROR,
@@ -498,11 +476,12 @@ int getRotOutFmt(uint32_t format);
  * rotation is 90, 180 etc
  * It returns MDP related enum/define that match rot+flip*/
 int getMdpOrient(eTransform rotation);
-int getOverlayMagnificationLimit();
 const char* getFormatString(int format);
 const char* getStateString(eOverlayState state);
 
-enum {
+// Cannot use HW_OVERLAY_MAGNIFICATION_LIMIT, since at the time
+// of integration, HW_OVERLAY_MAGNIFICATION_LIMIT was a define
+enum { HW_OV_MAGNIFICATION_LIMIT = 20,
     HW_OV_MINIFICATION_LIMIT  = 8
 };
 
@@ -563,8 +542,6 @@ inline bool isYuv(uint32_t format) {
         case MDP_Y_CBCR_H2V1:
         case MDP_Y_CBCR_H2V2:
         case MDP_Y_CRCB_H2V2:
-        case MDP_Y_CRCB_H1V1:
-        case MDP_Y_CRCB_H2V1:
         case MDP_Y_CRCB_H2V2_TILE:
         case MDP_Y_CBCR_H2V2_TILE:
         case MDP_Y_CR_CB_H2V2:
@@ -656,8 +633,6 @@ inline const char* getStateString(eOverlayState state){
             return "OV_3D_VIDEO_ON_3D_TV";
         case OV_3D_VIDEO_ON_2D_PANEL_2D_TV:
             return "OV_3D_VIDEO_ON_2D_PANEL_2D_TV";
-        case OV_2D_PIP_VIDEO_ON_PANEL:
-            return "OV_2D_PIP_VIDEO_ON_PANEL";
         case OV_UI_MIRROR:
             return "OV_UI_MIRROR";
         case OV_2D_TRUE_UI_MIRROR:
@@ -845,18 +820,6 @@ inline void ScreenInfo::dump(const char* const s) const {
             s, mFBWidth, mFBHeight, mFBbpp, mFBystride);
 }
 
-template <class T>
-inline void even_ceil(T& value) {
-    if(value & 1)
-        value++;
-}
-
-template <class T>
-inline void even_floor(T& value) {
-    if(value & 1)
-        value--;
-}
-
 } // namespace utils ends
 
 //--------------------Class Res stuff (namespace overlay only) -----------
@@ -905,11 +868,6 @@ public:
     /* populate path */
     void setPath(const char* const dev);
 
-    /* retrieve path */
-    const char* getPath() {
-        return (const char*) mPath;
-    };
-
     /* Close fd if we have a valid fd. */
     bool close();
 
@@ -924,7 +882,6 @@ public:
 
     /* dump the state of the instance */
     void dump() const;
-
 private:
     /* helper enum for determine valid/invalid fd */
     enum { INVAL = -1 };

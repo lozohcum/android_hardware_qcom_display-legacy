@@ -23,7 +23,6 @@
 #include "hwc_utils.h"
 #include "mdp_version.h"
 #include "hwc_video.h"
-#include "hwc_pip.h"
 #include "hwc_qbuf.h"
 #include "hwc_copybit.h"
 #include "hwc_external.h"
@@ -56,6 +55,8 @@ void initContext(hwc_context_t *ctx)
     ctx->mExtDisplay = new ExternalDisplay(ctx);
     memset(ctx->dpys,(int)EGL_NO_DISPLAY, MAX_NUM_DISPLAYS);
     MDPComp::init(ctx);
+
+    init_uevent_thread(ctx);
 
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.egl.swapinterval", value, "1");
@@ -134,14 +135,12 @@ void getLayerStats(hwc_context_t *ctx, const hwc_display_contents_1_t *list)
     //Video specific stats
     int yuvCount = 0;
     int yuvLayerIndex = -1;
-    int pipLayerIndex = -1; //2nd video in pip scenario
     bool isYuvLayerSkip = false;
     int skipCount = 0;
     int ccLayerIndex = -1; //closed caption
     int extLayerIndex = -1; //ext-only or block except closed caption
     int extCount = 0; //ext-only except closed caption
     bool isExtBlockPresent = false; //is BLOCK layer present
-    bool yuvSecure = false;
 
     for (size_t i = 0; i < list->numHwLayers; i++) {
         private_handle_t *hnd =
@@ -149,20 +148,9 @@ void getLayerStats(hwc_context_t *ctx, const hwc_display_contents_1_t *list)
 
         if (UNLIKELY(isYuvBuffer(hnd))) {
             yuvCount++;
-            if(yuvCount==1) {
-                //Set the primary video to the video layer in
-                //lower z-order
-                yuvLayerIndex = i;
-            }
-            if(yuvCount == 2) {
-                //In case of two videos, set the pipLayerIndex to the
-                //second video
-                pipLayerIndex = i;
-            }
-            yuvSecure = isSecureBuffer(hnd);
+            yuvLayerIndex = i;
             //Animating
-            //Do not mark as SKIP if it is secure buffer
-            if (isSkipLayer(&list->hwLayers[i]) && !yuvSecure) {
+            if (isSkipLayer(&list->hwLayers[i])) {
                 isYuvLayerSkip = true;
             }
         } else if(UNLIKELY(isExtCC(hnd))) {
@@ -178,18 +166,10 @@ void getLayerStats(hwc_context_t *ctx, const hwc_display_contents_1_t *list)
         } else if (isSkipLayer(&list->hwLayers[i])) { //Popups
             skipCount++;
         }
-        // check if video layer is below skip layer
-        if((isSkipLayer(&list->hwLayers[i]))) {
-            if((yuvLayerIndex >= 0) && ((unsigned int)yuvLayerIndex<i)) {
-               isYuvLayerSkip = true;
-            }
-        }
     }
 
     VideoOverlay::setStats(yuvCount, yuvLayerIndex, isYuvLayerSkip,
             ccLayerIndex);
-    VideoPIP::setStats(yuvCount, yuvLayerIndex, isYuvLayerSkip,
-            pipLayerIndex);
     ExtOnly::setStats(extCount, extLayerIndex, isExtBlockPresent);
     CopyBit::setStats(skipCount);
     MDPComp::setStats(skipCount);

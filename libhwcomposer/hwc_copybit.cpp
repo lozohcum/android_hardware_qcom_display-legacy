@@ -21,6 +21,7 @@
 #define DEBUG_COPYBIT 0
 #include <copybit.h>
 #include <genlock.h>
+#include <GLES/gl.h>
 #include "hwc_copybit.h"
 #include "comptype.h"
 #include "egl_handles.h"
@@ -79,9 +80,29 @@ bool CopyBit::canUseCopybitForYUV(hwc_context_t *ctx) {
     return true;
 }
 
+bool CopyBit::canUseContiguousMemory(const hwc_display_contents_1_t* list) {
+    if(!list) return false;
+    for (unsigned int i=0; i<list->numHwLayers; i++) {
+         private_handle_t *hnd = (private_handle_t *)list->hwLayers[i].handle;
+        if(hnd != NULL && (hnd->flags &
+            private_handle_t::PRIV_FLAGS_NONCONTIGUOUS_MEM )) {
+             return false;
+        }
+    }
+    return true;
+}
+
 bool CopyBit::canUseCopybitForRGB(hwc_context_t *ctx, hwc_display_contents_1_t *list) {
     int compositionType =
         qdutils::QCCompositionType::getInstance().getCompositionType();
+
+    if(compositionType & qdutils::COMPOSITION_TYPE_MDP){
+        // in MDP composition fall back to gpu if Buffers are not contiguous
+        if(! canUseContiguousMemory(list)) {
+            ALOGW("canUseContiguousMemory returned false, fallback to GPU");
+            return false;
+        }
+    }
 
     if (compositionType & qdutils::COMPOSITION_TYPE_DYN) {
         // DYN Composition:
@@ -156,9 +177,7 @@ bool CopyBit::prepare(hwc_context_t *ctx, hwc_display_contents_1_t *list) {
 
         if (hnd->bufferType == BUFFER_TYPE_VIDEO) {
           //YUV layer, check, if copybit can be used
-          // mark the video layer to gpu when all layer is
-          // going to gpu in case of dynamic composition.
-          if (useCopybitForYUV && useCopybitForRGB) {
+          if (useCopybitForYUV) {
               list->hwLayers[i].compositionType = HWC_USE_COPYBIT;
               sCopyBitDraw = true;
           }
@@ -167,7 +186,8 @@ bool CopyBit::prepare(hwc_context_t *ctx, hwc_display_contents_1_t *list) {
           if (useCopybitForRGB) {
               list->hwLayers[i].compositionType = HWC_USE_COPYBIT;
               sCopyBitDraw = true;
-          }
+          } else
+              list->hwLayers[i].compositionType = HWC_USE_GPU;
        }
     }
     return true;
@@ -188,6 +208,12 @@ bool CopyBit::draw(hwc_context_t *ctx, hwc_display_contents_1_t *list, EGLDispla
              __FUNCTION__);
         return -1;
     }
+
+    // Invoke a glFinish if we are rendering any layers using copybit.
+    // We call glFinish instead of locking the renderBuffer because the
+    // GPU could take longer than the genlock timeout value to complete
+    // rendering
+    glFinish();
 
     for (size_t i=0; i<list->numHwLayers; i++) {
         if (list->hwLayers[i].compositionType == HWC_USE_COPYBIT) {
@@ -351,9 +377,10 @@ int  CopyBit::drawLayerUsingCopybit(hwc_context_t *dev, hwc_layer_1_t *layer,
        }
        ALOGE("%s:%d::tmp_w = %d,tmp_h = %d",__FUNCTION__,__LINE__,tmp_w,tmp_h);
 
-       int usage = GRALLOC_USAGE_PRIVATE_MM_HEAP;
-
-       if (0 == alloc_buffer(&tmpHnd, tmp_w, tmp_h, fbHandle->format, usage)){
+       int usage = GRALLOC_USAGE_PRIVATE_MM_HEAP|GRALLOC_USAGE_PRIVATE_UNCACHED;
+       if(dev->mMDP.version < 400)
+          usage = GRALLOC_USAGE_PRIVATE_CAMERA_HEAP|GRALLOC_USAGE_PRIVATE_UNCACHED;
+       if (0 == alloc_buffer(&tmpHnd, tmp_w, tmp_h, HAL_PIXEL_FORMAT_RGB_565, usage)){
             copybit_image_t tmp_dst;
             copybit_rect_t tmp_rect;
             tmp_dst.w = tmp_w;

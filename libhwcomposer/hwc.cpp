@@ -28,7 +28,6 @@
 #include "hwc_utils.h"
 #include "hwc_qbuf.h"
 #include "hwc_video.h"
-#include "hwc_pip.h"
 #include "hwc_uimirror.h"
 #include "hwc_copybit.h"
 #include "hwc_external.h"
@@ -86,17 +85,14 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
     hwc_context_t* ctx = (hwc_context_t*)(dev);
     ctx->overlayInUse = false;
 
-    if(ctx->mSecureConfig == true) {
-        // This will tear down External Display Device.
-        return 0;
-    }
-
     if(ctx->mExtDisplay->getExternalDisplay())
         ovutils::setExtType(ctx->mExtDisplay->getExternalDisplay());
     if (ctx->hdmi_pending == true) {
         if ((qdutils::MDPVersion::getInstance().getMDPVersion() >=
-            qdutils::MDP_V4_2) || (ctx->mOverlay->getState() !=
-                                  ovutils::OV_BYPASS_3_LAYER)) {
+            qdutils::MDP_V4_2) ||((ctx->mOverlay->getState() !=
+            ovutils::OV_BYPASS_3_LAYER) && (ctx->mOverlay->getState() !=
+            ovutils::OV_BYPASS_2_LAYER) && (ctx->mOverlay->getState() !=
+                                ovutils::OV_BYPASS_1_LAYER))) {
             ctx->mExtDisplay->processUEventOnline((const char*)ctx->mHDMIEvent);
             ctx->hdmi_pending = false;
         }
@@ -108,7 +104,6 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
         if (LIKELY(list)) {
             //reset for this draw round
             VideoOverlay::reset();
-            VideoPIP::reset();
             ExtOnly::reset();
 
             getLayerStats(ctx, list);
@@ -117,8 +112,6 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
             if(VideoOverlay::prepare(ctx, list)) {
                 ctx->overlayInUse = true;
                 //Nothing here
-            } else if(VideoPIP::prepare(ctx, list)) {
-                ctx->overlayInUse = true;
             } else if(ExtOnly::prepare(ctx, list)) {
                 ctx->overlayInUse = true;
             } else if(UIMirrorOverlay::prepare(ctx, list)) {
@@ -221,7 +214,6 @@ static int hwc_set(hwc_composer_device_1 *dev,
         if (list->dpy && list->sur) {
             if (LIKELY(list)) {
                 VideoOverlay::draw(ctx, list);
-                VideoPIP::draw(ctx,list);
                 ExtOnly::draw(ctx, list);
                 CopyBit::draw(ctx, list, (EGLDisplay)list->dpy, (EGLSurface)list->sur);
                 MDPComp::draw(ctx, list);

@@ -141,15 +141,10 @@ public:
     /* dump state of the object */
     void dump() const;
 
-    /* Perform transformation calculations */
-    void doTransform();
-
-    /* Performs downscale calculations */
-    int doDownscale();
-
 private:
 
     /* helper functions for overlayTransform */
+    void doTransform();
     void overlayTransFlipH();
     void overlayTransFlipV();
     void overlayTransRot90();
@@ -338,10 +333,6 @@ inline void MdpCtrl::setSrcRectDim(const overlay::utils::Dim d) {
     mOVInfo.src_rect.y = d.y;
     mOVInfo.src_rect.w = d.w;
     mOVInfo.src_rect.h = d.h;
-    utils::even_ceil(mOVInfo.src_rect.x);
-    utils::even_ceil(mOVInfo.src_rect.y);
-    utils::even_floor(mOVInfo.src_rect.w);
-    utils::even_floor(mOVInfo.src_rect.h);
 }
 
 inline overlay::utils::Dim MdpCtrl::getDstRectDim() const {
@@ -356,10 +347,6 @@ inline void MdpCtrl::setDstRectDim(const overlay::utils::Dim d) {
     mOVInfo.dst_rect.y = d.y;
     mOVInfo.dst_rect.w = d.w;
     mOVInfo.dst_rect.h = d.h;
-    utils::even_ceil(mOVInfo.dst_rect.x);
-    utils::even_ceil(mOVInfo.dst_rect.y);
-    utils::even_floor(mOVInfo.dst_rect.w);
-    utils::even_floor(mOVInfo.dst_rect.h);
 }
 
 inline int MdpCtrl::getUserData() const { return mOVInfo.user_data[0]; }
@@ -476,8 +463,12 @@ inline void MdpData::reset() {
 }
 
 inline bool MdpData::close() {
+    if(-1 == mOvData.data.memory_id) return true;
     reset();
-    return mFd.close();
+    if(!mFd.close()) {
+        return false;
+    }
+    return true;
 }
 
 inline int MdpData::getSrcMemoryId() const { return mOvData.data.memory_id; }

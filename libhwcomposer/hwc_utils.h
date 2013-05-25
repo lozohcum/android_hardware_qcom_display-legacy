@@ -60,8 +60,6 @@ enum HWCCompositionType {
     HWC_USE_GPU = HWC_FRAMEBUFFER, // This layer is to be handled by
                                    // Surfaceflinger
     HWC_USE_OVERLAY = HWC_OVERLAY, // This layer is to be handled by the overlay
-    HWC_USE_BACKGROUND
-                = HWC_BACKGROUND,  // This layer is to be handled by TBD
     HWC_USE_COPYBIT                // This layer is to be handled by copybit
 };
 
@@ -98,10 +96,6 @@ static inline bool isYuvBuffer(const private_handle_t* hnd) {
     return (hnd && (hnd->bufferType == BUFFER_TYPE_VIDEO));
 }
 
-// Returns true if the buffer is secure
-static inline bool isSecureBuffer(const private_handle_t* hnd) {
-    return (hnd && (private_handle_t::PRIV_FLAGS_SECURE_BUFFER & hnd->flags));
-}
 //Return true if buffer is marked locked
 static inline bool isBufferLocked(const private_handle_t* hnd) {
     return (hnd && (private_handle_t::PRIV_FLAGS_HWC_LOCK & hnd->flags));
@@ -177,12 +171,6 @@ struct hwc_context_t {
 
     //Vsync
     struct vsync_state vstate;
-
-    // flag that indicate secure session status
-    bool mSecure;
-
-    // flag that indicate whether secure/desecure session in progress
-    bool mSecureConfig;
 
     bool hdmi_pending;
     char  mHDMIEvent[512];

@@ -20,7 +20,7 @@
 #include "hwc_qbuf.h"
 #include "hwc_video.h"
 #include "hwc_external.h"
-#include <mdp_version.h>
+#include "qdMetaData.h"
 
 namespace qhwc {
 
@@ -35,9 +35,7 @@ bool VideoOverlay::sIsModeOn = false;
 //Cache stats, figure out the state, config overlay
 bool VideoOverlay::prepare(hwc_context_t *ctx, hwc_display_contents_1_t *list) {
     sIsModeOn = false;
-    if((!ctx->mMDP.hasOverlay) ||
-                            (qdutils::MDPVersion::getInstance().getMDPVersion()
-                             <= qdutils::MDP_V4_0)) {
+    if(!ctx->mMDP.hasOverlay) {
        ALOGD_IF(VIDEO_DEBUG,"%s, this hw doesnt support overlay", __FUNCTION__);
        return false;
     }
@@ -120,6 +118,10 @@ bool configPrimVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
         ovutils::setMdpFlags(mdpFlags,
                 ovutils::OV_MDP_BLEND_FG_PREMULT);
     }
+    MetaData_t *metadata = (MetaData_t *)hnd->base_metadata;
+    if ((metadata->operation & PP_PARAM_INTERLACED) && metadata->interlaced) {
+        ovutils::setMdpFlags(mdpFlags, ovutils::OV_MDP_DEINTERLACE);
+    }
 
     ovutils::eIsFg isFgFlag = ovutils::IS_FG_OFF;
     if (ctx->numHwLayers == 1) {
@@ -130,12 +132,22 @@ bool configPrimVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
             info,
             ovutils::ZORDER_0,
             isFgFlag,
-            ovutils::ROT_DOWNSCALE_ENABLED);
+            ovutils::ROT_FLAG_DISABLED);
     ovutils::PipeArgs pargs[ovutils::MAX_PIPES] = { parg, parg, parg };
     ov.setSource(pargs, ovutils::OV_PIPE0);
 
     hwc_rect_t sourceCrop = layer->sourceCrop;
+    // x,y,w,h
+    ovutils::Dim dcrop(sourceCrop.left, sourceCrop.top,
+            sourceCrop.right - sourceCrop.left,
+            sourceCrop.bottom - sourceCrop.top);
+
+    ovutils::Dim dpos;
     hwc_rect_t displayFrame = layer->displayFrame;
+    dpos.x = displayFrame.left;
+    dpos.y = displayFrame.top;
+    dpos.w = (displayFrame.right - displayFrame.left);
+    dpos.h = (displayFrame.bottom - displayFrame.top);
 
     //Calculate the rect for primary based on whether the supplied position
     //is within or outside bounds.
@@ -148,13 +160,19 @@ bool configPrimVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
             displayFrame.top < 0 ||
             displayFrame.right > fbWidth ||
             displayFrame.bottom > fbHeight) {
+
         calculate_crop_rects(sourceCrop, displayFrame, fbWidth, fbHeight);
+
+        //Update calculated width and height
+        dcrop.w = sourceCrop.right - sourceCrop.left;
+        dcrop.h = sourceCrop.bottom - sourceCrop.top;
+
+        dpos.x = displayFrame.left;
+        dpos.y = displayFrame.top;
+        dpos.w = displayFrame.right - displayFrame.left;
+        dpos.h = displayFrame.bottom - displayFrame.top;
     }
 
-    // source crop x,y,w,h
-    ovutils::Dim dcrop(sourceCrop.left, sourceCrop.top,
-            sourceCrop.right - sourceCrop.left,
-            sourceCrop.bottom - sourceCrop.top);
     //Only for Primary
     ov.setCrop(dcrop, ovutils::OV_PIPE0);
 
@@ -162,11 +180,6 @@ bool configPrimVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
             static_cast<ovutils::eTransform>(layer->transform);
     ov.setTransform(orient, ovutils::OV_PIPE0);
 
-    // position x,y,w,h
-    ovutils::Dim dpos(displayFrame.left,
-            displayFrame.top,
-            displayFrame.right - displayFrame.left,
-            displayFrame.bottom - displayFrame.top);
     ov.setPosition(dpos, ovutils::OV_PIPE0);
 
     if (!ov.commit(ovutils::OV_PIPE0)) {
@@ -186,7 +199,10 @@ bool configExtVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
         ovutils::setMdpFlags(mdpFlags,
                 ovutils::OV_MDP_SECURE_OVERLAY_SESSION);
     }
-
+    MetaData_t *metadata = (MetaData_t *)hnd->base_metadata;
+    if ((metadata->operation & PP_PARAM_INTERLACED) && metadata->interlaced) {
+        ovutils::setMdpFlags(mdpFlags, ovutils::OV_MDP_DEINTERLACE);
+    }
     ovutils::eIsFg isFgFlag = ovutils::IS_FG_OFF;
     if (ctx->numHwLayers == 1) {
         isFgFlag = ovutils::IS_FG_SET;
@@ -196,7 +212,7 @@ bool configExtVid(hwc_context_t *ctx, hwc_layer_1_t *layer) {
             info,
             ovutils::ZORDER_0,
             isFgFlag,
-            ovutils::ROT_FLAGS_NONE);
+            ovutils::ROT_FLAG_DISABLED);
     ovutils::PipeArgs pargs[ovutils::MAX_PIPES] = { parg, parg, parg };
     ov.setSource(pargs, ovutils::OV_PIPE1);
 
@@ -242,7 +258,7 @@ bool configExtCC(hwc_context_t *ctx, hwc_layer_1_t *layer) {
             info,
             ovutils::ZORDER_1,
             isFgFlag,
-            ovutils::ROT_FLAGS_NONE);
+            ovutils::ROT_FLAG_DISABLED);
     ovutils::PipeArgs pargs[ovutils::MAX_PIPES] = { parg, parg, parg };
     ov.setSource(pargs, ovutils::OV_PIPE2);
 

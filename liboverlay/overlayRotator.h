@@ -60,10 +60,9 @@ public:
     virtual void setDisable() = 0;
     virtual void setRotations(uint32_t r) = 0;
     virtual void setSrcFB() = 0;
-    virtual void setDownscale(int ds) = 0;
 
     virtual bool enabled() const = 0;
-    virtual uint32_t getSessId() const = 0;
+    virtual int getSessId() const = 0;
     virtual int getDstMemId() const = 0;
     virtual uint32_t getDstOffset() const = 0;
     virtual void dump() const = 0;
@@ -103,12 +102,10 @@ public:
     virtual void setRotations(uint32_t r) = 0;
     /* Mark src as FB (non-ION) */
     virtual void setSrcFB() = 0;
-    /* Sets downscale ratio */
-    virtual void setDownscale(int ds) = 0;
     /* Retusn true if rotator enabled */
     virtual bool enabled() const = 0;
     /* returns rotator session id */
-    virtual uint32_t getSessId() const = 0;
+    virtual int getSessId() const = 0;
     /* get dst (for offset and memory id) non-virt */
     virtual int getDstMemId() const = 0;
     virtual uint32_t getDstOffset() const = 0;
@@ -141,9 +138,8 @@ public:
     virtual uint32_t getDstOffset() const;
     virtual void setEnable();
     virtual void setDisable();
-    virtual void setDownscale(int ds);
     virtual bool enabled () const;
-    virtual uint32_t getSessId() const;
+    virtual int getSessId() const;
     virtual bool queueBuffer(int fd, uint32_t offset);
     virtual void dump() const;
 };
@@ -166,10 +162,9 @@ public:
     virtual bool queueBuffer(int fd, uint32_t offset);
     virtual void setEnable();
     virtual void setDisable();
-    virtual void setDownscale(int ds);
     virtual bool enabled () const;
     virtual void setSrcFB();
-    virtual uint32_t getSessId() const;
+    virtual int getSessId() const;
     virtual int getDstMemId() const;
     virtual uint32_t getDstOffset() const;
     virtual void dump() const;
@@ -230,9 +225,8 @@ public:
     void setDisable();
     void setRotations(uint32_t r);
     void setSrcFB();
-    void setDownscale(int ds);
     bool enabled() const;
-    uint32_t getSessId() const;
+    int getSessId() const;
     int getDstMemId() const;
     uint32_t getDstOffset() const;
     void dump() const;
@@ -246,17 +240,8 @@ private:
     /* reset underlying data, basically memset 0 */
     void reset();
 
-    /* return true if current rotator config is different
-     * than last known config */
-    bool rotConfChanged() const;
-
-    /* save mRotImgInfo to be last known good config*/
-    void save();
-
     /* rot info*/
     msm_rotator_img_info mRotImgInfo;
-    /* Last saved rot info*/
-    msm_rotator_img_info mLSRotImgInfo;
     /* rot data */
     msm_rotator_data_info mRotDataInfo;
     /* Orientation */
@@ -268,6 +253,7 @@ private:
     /* Single Rotator buffer size */
     uint32_t mBufSize;
 };
+
 
 //--------------inlines------------------------------------
 
@@ -313,7 +299,6 @@ inline void Rotator::setEnable(){ mRot->setEnable(); }
 inline void Rotator::setDisable(){ mRot->setDisable(); }
 inline bool Rotator::enabled() const { return mRot->enabled(); }
 inline void Rotator::setSrcFB() { mRot->setSrcFB(); }
-inline void Rotator::setDownscale(int ds) { mRot->setDownscale(ds); }
 inline int Rotator::getDstMemId() const {
     return mRot->getDstMemId();
 }
@@ -323,7 +308,7 @@ inline uint32_t Rotator::getDstOffset() const {
 inline void Rotator::setRotations(uint32_t rot) {
     mRot->setRotations (rot);
 }
-inline uint32_t Rotator::getSessId() const {
+inline int Rotator::getSessId() const {
     return mRot->getSessId();
 }
 inline void Rotator::dump() const {
@@ -349,10 +334,9 @@ inline void NullRotator::setRotations(uint32_t) {}
 inline void NullRotator::setEnable() {}
 inline void NullRotator::setDisable() {}
 inline bool NullRotator::enabled() const { return false; }
-inline uint32_t NullRotator::getSessId() const { return -1; }
+inline int NullRotator::getSessId() const { return -1; }
 inline bool NullRotator::queueBuffer(int fd, uint32_t offset) { return true; }
 inline void NullRotator::setSrcFB() {}
-inline void NullRotator::setDownscale(int ds) { }
 inline int NullRotator::getDstMemId() const { return -1; }
 inline uint32_t NullRotator::getDstOffset() const { return 0;}
 inline void NullRotator::dump() const {
@@ -367,37 +351,17 @@ inline void MdpRot::setEnable() { mRotImgInfo.enable = 1; }
 inline void MdpRot::setDisable() { mRotImgInfo.enable = 0; }
 inline bool MdpRot::enabled() const { return mRotImgInfo.enable; }
 inline void MdpRot::setRotations(uint32_t r) { mRotImgInfo.rotations = r; }
-inline void MdpRot::setDownscale(int ds) {
-    if ((utils::ROT_DS_EIGHTH == ds) && (mRotImgInfo.src_rect.h & 0xF)) {
-        // Ensure src_rect.h is a multiple of 16 for 1/8 downscaling.
-        // This is an undocumented MDP Rotator constraint.
-        // Note that src_rect.h is already ensured to be 32 pixel height aligned
-        // for MDP_Y_CRCB_H2V2_TILE and MDP_Y_CBCR_H2V2_TILE formats.
-        mRotImgInfo.src_rect.h = utils::alignup(mRotImgInfo.src_rect.h, 16);
-    }
-    mRotImgInfo.downscale_ratio = ds;
-}
 inline int MdpRot::getDstMemId() const {
     return mRotDataInfo.dst.memory_id;
 }
 inline uint32_t MdpRot::getDstOffset() const {
     return mRotDataInfo.dst.offset;
 }
-inline uint32_t MdpRot::getSessId() const { return mRotImgInfo.session_id; }
+inline int MdpRot::getSessId() const { return mRotImgInfo.session_id; }
 inline void MdpRot::setSrcFB() {
     mRotDataInfo.src.flags |= MDP_MEMORY_ID_TYPE_FB;
 }
-inline void MdpRot::save() {
-    mLSRotImgInfo = mRotImgInfo;
-}
-inline bool MdpRot::rotConfChanged() const {
-    // 0 means same
-    if(0 == ::memcmp(&mRotImgInfo, &mLSRotImgInfo,
-                sizeof (msm_rotator_img_info))) {
-        return false;
-    }
-    return true;
-}
+
 } // overlay
 
 #endif // OVERlAY_ROTATOR_H

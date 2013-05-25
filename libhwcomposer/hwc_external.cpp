@@ -64,9 +64,14 @@ void ExternalDisplay::setEDIDMode(int resMode) {
         Mutex::Autolock lock(mExtDispLock);
         extDispType = mExternalDisplay;
         setExternalDisplay(0);
+    }
+    triggerRefresh();
+    {
+        Mutex::Autolock lock(mExtDispLock);
         setResolution(resMode);
     }
     setExternalDisplay(extDispType);
+    triggerRefresh();
 }
 
 void ExternalDisplay::setHPDStatus(int enabled) {
@@ -79,6 +84,18 @@ void ExternalDisplay::setActionSafeDimension(int w, int h) {
     Mutex::Autolock lock(mExtDispLock);
     overlay::utils::ActionSafe::getInstance()->setDimension(w, h);
     setExternalDisplay(mExternalDisplay);
+}
+
+void ExternalDisplay::triggerRefresh() {
+    hwc_context_t* ctx = mHwcContext;
+    hwc_procs* proc = (hwc_procs*)ctx->device.reserved_proc[0];
+    if(!proc) {
+        ALOGE("%s: HWC proc not registered", __FUNCTION__);
+    } else {
+        /* Trigger redraw */
+        ALOGD_IF(DEBUG, "%s: Invalidate !!", __FUNCTION__);
+        proc->invalidate(proc);
+    }
 }
 
 int ExternalDisplay::getModeCount() const {
@@ -249,12 +266,9 @@ const char* msmFbDevicePath[2] = {  "/dev/graphics/fb1",
 bool ExternalDisplay::openFrameBuffer(int fbNum)
 {
     if (mFd == -1) {
-        ALOGD_IF(DEBUG, "In %s: opening the framebuffer device = %d",
-                                                  __FUNCTION__, fbNum);
         mFd = open(msmFbDevicePath[fbNum-1], O_RDWR);
         if (mFd < 0)
-            ALOGE("%s: %s not available", __FUNCTION__,
-                                                    msmFbDevicePath[fbNum-1]);
+            ALOGE("%s: %s not available", __FUNCTION__, msmFbDevicePath[fbNum-1]);
     }
     return (mFd > 0);
 }
@@ -353,9 +367,7 @@ void ExternalDisplay::setResolution(int ID)
         ALOGD("In %s: FBIOGET_VSCREENINFO failed Err Str = %s", __FUNCTION__,
                                                             strerror(errno));
     }
-#ifdef FORCE_AUTO_RESOLUTION
-    ID = 0;
-#endif
+
     ALOGD_IF(DEBUG, "%s: GET Info<ID=%d %dx%d (%d,%d,%d),"
             "(%d,%d,%d) %dMHz>", __FUNCTION__,
             mVInfo.reserved[3], mVInfo.xres, mVInfo.yres,
@@ -389,6 +401,23 @@ void ExternalDisplay::setResolution(int ID)
         }
         mCurrentMode = ID;
     }
+    //Powerup
+    ret = ioctl(mFd, FBIOBLANK, FB_BLANK_UNBLANK);
+    if(ret < 0) {
+        ALOGD("In %s: FBIOBLANK failed Err Str = %s", __FUNCTION__,
+                                                            strerror(errno));
+    }
+    ret = ioctl(mFd, FBIOGET_VSCREENINFO, &mVInfo);
+    if(ret < 0) {
+        ALOGD("In %s: FBIOGET_VSCREENINFO failed Err Str = %s", __FUNCTION__,
+                                                            strerror(errno));
+    }
+    //Pan_Display
+    ret = ioctl(mFd, FBIOPAN_DISPLAY, &mVInfo);
+    if(ret < 0) {
+        ALOGD("In %s: FBIOPAN_DISPLAY  failed Err Str = %s", __FUNCTION__,
+                                                            strerror(errno));
+    }
 }
 
 /*
@@ -403,6 +432,7 @@ bool ExternalDisplay::isHDMIConfigured() {
     bool configured = false;
     FILE *displayDeviceFP = NULL;
     char fbType[MAX_FRAME_BUFFER_NAME_SIZE];
+
     displayDeviceFP = fopen("/sys/class/graphics/fb1/msm_fb_type", "r");
 
     if(displayDeviceFP) {
@@ -420,31 +450,18 @@ void ExternalDisplay::processUEventOffline(const char *str) {
     const char *s1 = str + (strlen(str)-strlen(DEVICE_NODE_FB1));
     // check if it is for FB1
     if(strncmp(s1,DEVICE_NODE_FB1, strlen(DEVICE_NODE_FB1))== 0) {
-        if(isHDMIConfigured()) {
-            enableHDMIVsync(EXTERN_DISPLAY_NONE);
-            closeFrameBuffer();
-            resetInfo();
-        } else {
-            closeFrameBuffer();
-        }
+        enableHDMIVsync(EXTERN_DISPLAY_NONE);
+        closeFrameBuffer();
+        resetInfo();
+        setExternalDisplay(EXTERN_DISPLAY_NONE);
     }
     else if(strncmp(s1, DEVICE_NODE_FB2, strlen(DEVICE_NODE_FB2)) == 0) {
         closeFrameBuffer();
+        setExternalDisplay(EXTERN_DISPLAY_NONE);
     }
-    setExternalDisplay(EXTERN_DISPLAY_NONE);
+    triggerRefresh();
 }
 
-void ExternalDisplay::configureWFDDisplay(int fbIndex) {
-    int ret = 0;
-    if (!openFrameBuffer(fbIndex))
-        return;
-    ret = ioctl(mFd, FBIOGET_VSCREENINFO, &mVInfo);
-    if(ret < 0) {
-        ALOGD("In %s: FBIOGET_VSCREENINFO failed Err Str = %s", __FUNCTION__,
-                strerror(errno));
-    }
-    mVInfo.activate = FB_ACTIVATE_NOW | FB_ACTIVATE_ALL | FB_ACTIVATE_FORCE;
-}
 
 void ExternalDisplay::processUEventOnline(const char *str) {
     const char *s1 = str + (strlen(str)-strlen(DEVICE_NODE_FB1));
@@ -456,15 +473,15 @@ void ExternalDisplay::processUEventOnline(const char *str) {
             if(mExternalDisplay == EXTERN_DISPLAY_FB2) {
                 closeFrameBuffer();
                 setExternalDisplay(EXTERN_DISPLAY_NONE);
+                triggerRefresh();
             }
-            readResolution();
-            //Get the best mode and set
-            setResolution(getBestMode());
-            enableHDMIVsync(EXTERN_DISPLAY_FB1);
-        } else {
-            configureWFDDisplay(EXTERN_DISPLAY_FB1);
         }
+        readResolution();
+        //Get the best mode and set
+        setResolution(getBestMode());
+        enableHDMIVsync(EXTERN_DISPLAY_FB1);
         setExternalDisplay(EXTERN_DISPLAY_FB1);
+        triggerRefresh();
     }
     else if(strncmp(s1, DEVICE_NODE_FB2, strlen(DEVICE_NODE_FB2)) == 0) {
         // WFD connect event
@@ -473,29 +490,20 @@ void ExternalDisplay::processUEventOnline(const char *str) {
             // Do Not Override.
         }else {
             // WFD is connected
-            configureWFDDisplay(EXTERN_DISPLAY_FB2);
+            openFrameBuffer(EXTERN_DISPLAY_FB2);
             setExternalDisplay(EXTERN_DISPLAY_FB2);
+            triggerRefresh();
         }
     }
 }
 
 void ExternalDisplay::setExternalDisplay(int connected)
 {
-    hwc_context_t* ctx = mHwcContext;
-    if(ctx) {
-        ALOGD_IF(DEBUG, "%s: status = %d", __FUNCTION__,
+    ALOGD_IF(DEBUG, "%s: status = %d", __FUNCTION__,
                  connected);
-        // Store the external display
-        mExternalDisplay = connected;
-        ALOGD_IF(DEBUG, "In %s: mExternalDisplay = %d", __FUNCTION__,
-                                                         mExternalDisplay);
-        const char* prop = (connected) ? "1" : "0";
-        // set system property
-        property_set("hw.hdmiON", prop);
-        /* Trigger redraw */
-        ALOGD_IF(DEBUG, "%s: Invalidate !!", __FUNCTION__);
-        ctx->proc->invalidate(ctx->proc);
-    }
+    // Store the external display
+    mExternalDisplay = connected;
+
     return;
 }
 
@@ -526,47 +534,29 @@ bool ExternalDisplay::writeHPDOption(int userOption) const
     return ret;
 }
 
-/*
- * commits the changes to the external display
- * mExternalDisplay has the mixer number(1-> HDMI 2-> WFD)
- */
 bool ExternalDisplay::commit()
 {
     if(mFd == -1) {
         return false;
-#ifdef MSMFB_OVERLAY_COMMIT
-    } else if(ioctl(mFd, MSMFB_OVERLAY_COMMIT, &mExternalDisplay) == -1) {
-         ALOGE("%s: MSMFB_OVERLAY_COMMIT failed errno: %d , str: %s",
-                                       __FUNCTION__, errno, strerror(errno));
-#else
     } else if(ioctl(mFd, FBIOPUT_VSCREENINFO, &mVInfo) == -1) {
          ALOGE("%s: FBIOPUT_VSCREENINFO failed, str: %s", __FUNCTION__,
-                                      strerror(errno));
-#endif
+                                                          strerror(errno));
          return false;
     }
     return true;
 }
 
-/*
- * return 0 on success
- * return -errno on ioctl failure as the hwc_eventControl need
- * to return -errno.
- */
 int ExternalDisplay::enableHDMIVsync(int enable)
 {
-    int ret = 0;
-#ifndef NO_HW_VSYNC
     if(mFd > 0) {
         int ret = ioctl(mFd, MSMFB_OVERLAY_VSYNC_CTRL, &enable);
         if (ret<0) {
             ALOGE("%s: enabling HDMI vsync failed, str: %s", __FUNCTION__,
                                                             strerror(errno));
-            ret = -errno;
         }
     }
-#endif
-    return ret;
+    return -errno;
 }
 
 };
+

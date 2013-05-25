@@ -92,25 +92,30 @@ bool UIMirrorOverlay::configure(hwc_context_t *ctx, hwc_display_contents_1_t *li
             ovutils::Whf info(alignedW, hnd->height, hnd->format, size);
             // Determine the RGB pipe for UI depending on the state
             ovutils::eDest dest = ovutils::OV_PIPE_ALL;
+            ovutils::eMdpFlags mdpFlags = ovutils::OV_MDP_FLAGS_NONE;
+
             if (sState == ovutils::OV_2D_TRUE_UI_MIRROR) {
                 // True UI mirroring state: external RGB pipe is OV_PIPE2
                 dest = ovutils::OV_PIPE2;
             } else if (sState == ovutils::OV_UI_MIRROR) {
                 // UI-only mirroring state: external RGB pipe is OV_PIPE0
                 dest = ovutils::OV_PIPE0;
+                ovutils::setMdpFlags(mdpFlags,
+                                     ovutils::OV_MDP_PIPE_SHARE);
             }
 
-            ovutils::eMdpFlags mdpFlags = ovutils::OV_MDP_FLAGS_NONE;
-            if (ctx->mSecure == true) {
-                ovutils::setMdpFlags(mdpFlags,
-                                     ovutils::OV_MDP_SECURE_OVERLAY_SESSION);
-            }
+            /* - TODO: Secure content
+               if (hnd->flags & private_handle_t::PRIV_FLAGS_SECURE_BUFFER) {
+               ovutils::setMdpFlags(mdpFlags,
+               ovutils::OV_MDP_SECURE_OVERLAY_SESSION);
+               }
+             */
 
             ovutils::PipeArgs parg(mdpFlags,
                     info,
                     ovutils::ZORDER_0,
                     ovutils::IS_FG_OFF,
-                    ovutils::ROT_0_ENABLED);
+                    ovutils::ROT_FLAG_ENABLED);
             ovutils::PipeArgs pargs[ovutils::MAX_PIPES] = { parg, parg, parg };
             ov.setSource(pargs, dest);
 
